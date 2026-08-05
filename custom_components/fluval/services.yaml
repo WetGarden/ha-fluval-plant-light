@@ -1,0 +1,6 @@
+apply_schedule:
+  name: Apply schedule
+  description: >-
+    Connects to the Fluval Plant 3.0 light over BLE, via whichever Bluetooth
+    proxy currently has it in range, and applies the correct power and
+    per-channel brightness for the current time of day.

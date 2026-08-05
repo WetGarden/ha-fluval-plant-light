@@ -1,0 +1,10 @@
+{
+  "domain": "fluval",
+  "name": "Fluval Plant Light Schedule",
+  "codeowners": [],
+  "dependencies": ["bluetooth"],
+  "documentation": "",
+  "iot_class": "local_polling",
+  "requirements": ["bleak-retry-connector>=3.0.0"],
+  "version": "1.0.0"
+}
