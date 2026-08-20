@@ -79,13 +79,20 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 )
                 await asyncio.sleep(0.5)
 
+                # response=True (write-with-response) on purpose for these two
+                # state-changing writes: over a marginal proxy connection, a
+                # fire-and-forget write can silently vanish while this still logs
+                # success, leaving the light stuck out of sync with no way to
+                # detect it. Write-with-response makes bleak raise on a missing
+                # ack instead, so a dropped command hits the existing "will retry
+                # next cycle" path below rather than a silent no-op.
                 await client.write_gatt_char(
-                    proto.WRITE_CHAR, data=proto.power_message(any_on), response=False
+                    proto.WRITE_CHAR, data=proto.power_message(any_on), response=True
                 )
                 await asyncio.sleep(0.3)
 
                 msg = proto.brightness_message(*(values[c] for c in CHANNEL_ORDER))
-                await client.write_gatt_char(proto.WRITE_CHAR, data=msg, response=False)
+                await client.write_gatt_char(proto.WRITE_CHAR, data=msg, response=True)
                 await asyncio.sleep(0.3)
 
                 _LOGGER.info(
