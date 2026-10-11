@@ -7,12 +7,17 @@ against the thread's captured example:
   (0x68 header, 0x04 brightness command, channels ff/ff/ff/ff/00fb=251, CRC 0x97)
 """
 
-WRITE_CHAR = "00001002-0000-1000-8000-00805F9B34FB"
+# 1001 is the only command endpoint; 1002 is notify-only. Until 2026-10-11
+# commands were written to 1002: with response=True the light rejected them
+# (ATT error 3), with response=False they were silently dropped. Confirmed
+# against MrMooreUK/fluvalble (LEGACY_COMMAND_WRITE_UUIDS / NOTIFY_UUIDS).
+WRITE_CHAR = "00001001-0000-1000-8000-00805F9B34FB"
 NOTIFY_CHAR = "00001002-0000-1000-8000-00805F9B34FB"
-HANDSHAKE_CHAR = "00001001-0000-1000-8000-00805F9B34FB"
+HANDSHAKE_CHAR = WRITE_CHAR
 KEEPALIVE_CHAR = "00001004-0000-1000-8000-00805F9B34FB"
 
 NO_CHANGE = 0xFFFF
+CMD_CLOCK = 0x0E
 CMD_SWITCH = 0x03
 CMD_BRIGHTNESS = 0x04
 
@@ -39,6 +44,19 @@ def build_message(payload: list[int]) -> bytearray:
     msg = bytearray([0x68]) + bytearray(payload)
     msg.append(_crc(msg))
     return _encrypt(msg)
+
+
+MODE_NAMES = {0x00: "manual", 0x01: "auto", 0x02: "pro"}
+
+
+def clock_message(now) -> bytearray:
+    """Set the light's clock (cmd 0x0E: YY M D ISO-weekday h m s). The light has
+    no RTC battery; after a power loss its clock resets and a pro-mode schedule
+    runs against the wrong time. Layout from MrMooreUK/fluvalble old_clock_packet."""
+    return build_message([
+        CMD_CLOCK, now.year % 100, now.month, now.day, now.isoweekday(),
+        now.hour, now.minute, now.second,
+    ])
 
 
 def power_message(on: bool) -> bytearray:

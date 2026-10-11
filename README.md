@@ -1,49 +1,63 @@
-# Home Assistant: Fluval Plant Light Schedule Enforcer
+# Home Assistant: Fluval Plant Light Clock Sync
 
-Fixes a well-known Fluval Plant 3.0 problem: **the light's onboard BLE-programmed
-schedule is lost on any power interruption**, and it stays dark (or stuck at
-whatever brightness it was at) until you manually reprogram it through the
-FluvalSmart app. This integration bypasses the light's own clock entirely —
-Home Assistant computes what the brightness *should* be for the current time
-of day and pushes it directly over Bluetooth every few minutes, so a power
-blip corrects itself automatically instead of requiring you to notice and fix
-it by hand.
+> **Disclosure:** I used [Claude](https://claude.ai) (Anthropic's AI assistant)
+> to help me create and troubleshoot this integration. It's shared as-is in
+> case it's useful to someone else. **Don't expect much, if any, support**:
+> issues and PRs may go unanswered.
 
-This talks directly to the light's BLE GATT protocol (reverse-engineered by
-[TooManyFrogs on plantedtank.net](https://www.plantedtank.net/), "Reverse
-Engineering the Fluval Plant 3.0 BLE protocol", 2022) — it does not use or
-need the FluvalSmart app at all once set up.
+Fixes a common Fluval Plant 3.0 problem: **after a power interruption the
+light stays dark (or runs at the wrong times) until you open the FluvalSmart
+app.** The light has no clock battery, so a power loss resets its clock. The
+Auto/Pro schedule you programmed is still stored on the light, but it now runs
+against the wrong time of day. Opening the app fixes it only because the app
+sets the clock when it connects.
 
-**Tested against**: Fluval Plant 3.0 specifically. The protocol details
-(command bytes, encryption wrapper, 5-channel layout) may or may not apply
-unmodified to other Fluval light models — if you try this on a different
-model and it works (or needs tweaking), please open an issue or PR.
+This integration does the same thing automatically: Home Assistant connects to
+the light over Bluetooth every few minutes and sets its clock. Your schedule
+stays on the light and is still edited in the FluvalSmart app as usual.
+
+It talks directly to the light's BLE GATT protocol, reverse-engineered by
+[TooManyFrogs on plantedtank.net](https://www.plantedtank.net/) ("Reverse
+Engineering the Fluval Plant 3.0 BLE protocol", 2022). The clock command and
+the characteristic layout come from
+[MrMooreUK/fluvalble](https://github.com/MrMooreUK/fluvalble), a much more
+complete Fluval integration that is worth looking at if you want full control
+(power, channels, modes) rather than just clock sync.
+
+**Tested against**: one Fluval Plant 3.0 in Pro mode. Other Fluval models may
+or may not use the same protocol.
 
 ## How it works
 
 - A custom Home Assistant integration (`custom_components/fluval`) registers
-  a service, `fluval.apply_schedule`, that connects to the light over BLE and
-  writes the correct power/brightness for the current time.
+  a service, `fluval.apply_schedule`, that connects to the light over BLE,
+  sets its clock to Home Assistant's local time, and reads back its state.
 - An automation calls that service every 5 minutes and on Home Assistant
-  startup — the same "re-assert state, don't just wait for an edge"
-  approach used for things like smart plugs with unreliable cloud scheduling.
-- Your schedule (the actual ramp-up/hold/ramp-down times and percentages you
-  want) lives in a plain Python file you edit once, `fluval_schedule.py` —
-  nothing reads this back from the FluvalSmart app automatically.
+  startup, so the clock is corrected within a few minutes of power returning.
+- It sends no power, brightness or mode commands, so it never overrides the
+  schedule you set in the app.
+
+## Upgrading from 1.x
+
+Version 1.x tried to enforce a schedule from Home Assistant by sending
+power/brightness commands. Those commands were written to the wrong BLE
+characteristic (`1002`, which is notify-only) and never reached the light, so
+1.x never actually worked. 2.0 writes to the correct one (`1001`) and only
+syncs the clock. `fluval_schedule.py` is gone; set your schedule in the
+FluvalSmart app instead. The service name and automation are unchanged.
 
 ## Prerequisites
 
 - Home Assistant with the core **Bluetooth** integration enabled (it is by
   default in most installs).
 - **Your light needs to be in Bluetooth range of something Home Assistant can
-  use as a scanner** — either HA's own local Bluetooth adapter, or an
+  use as a scanner**: either HA's own Bluetooth adapter, or an
   [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html)
-  (a cheap ESP32 board flashed with ESPHome's Bluetooth proxy firmware,
-  placed near the tank) if your HA server isn't close enough. Aquarium water
-  itself attenuates 2.4GHz signal significantly, so if your server is more
-  than a room away, budget for needing a proxy — this is a common enough
-  situation that it's worth planning for from the start rather than
-  discovering it after installing.
+  (a cheap ESP32 board placed near the tank). Aquarium water attenuates
+  2.4GHz signal significantly, so if your server is more than a room away,
+  plan on needing a proxy.
+- The light set to **Auto or Pro mode** in the FluvalSmart app, with the
+  schedule you want.
 
 ## Installation
 
@@ -51,8 +65,7 @@ model and it works (or needs tweaking), please open an issue or PR.
    Assistant config directory, so you end up with
    `<config>/custom_components/fluval/__init__.py` etc.
 2. Find your light's Bluetooth MAC address. The easiest way is the
-   FluvalSmart app's device list (it's shown alongside your light's name),
-   or by scanning for it directly if you have a way to do that.
+   FluvalSmart app's device list (it's shown alongside your light's name).
 3. Add this to your `configuration.yaml`:
 
    ```yaml
@@ -60,16 +73,12 @@ model and it works (or needs tweaking), please open an issue or PR.
      mac_address: "AA:BB:CC:DD:EE:FF"
    ```
 
-4. **Edit `custom_components/fluval/fluval_schedule.py`** to match your own
-   light's actual schedule — the file has an example curve in it and
-   explains the format in its header comment. This is the one file you're
-   expected to customize per-install; everything else should work as-is.
-5. Add an automation (`automations.yaml` or via the UI) to call the service
+4. Add an automation (`automations.yaml` or via the UI) to call the service
    on a recurring basis:
 
    ```yaml
    - id: 'fluval_schedule_enforce'
-     alias: 'Fluval Plant Light - enforce schedule'
+     alias: 'Fluval Plant Light - sync clock'
      trigger:
        - platform: time_pattern
          minutes: '/5'
@@ -79,27 +88,27 @@ model and it works (or needs tweaking), please open an issue or PR.
        - service: fluval.apply_schedule
    ```
 
-6. Restart Home Assistant (custom components with a plain `async_setup` need
-   a full restart to be picked up — just being present in
-   `custom_components/` isn't enough on its own).
+5. Restart Home Assistant (custom components with a plain `async_setup` need
+   a full restart to be picked up; being present in `custom_components/`
+   isn't enough on its own).
+
+To test it, close the FluvalSmart app, unplug the light for 10 seconds during
+a time your schedule has it on, and plug it back in. It should light up
+within 5 minutes without opening the app.
 
 ## Troubleshooting
 
-- **"Service not found" when the automation runs**: double check
-  `fluval:` (with your `mac_address:`) is actually present in
-  `configuration.yaml` — a component like this one does nothing at all,
-  silently, if it's not referenced there, even if the files are in place.
-- **GATT error "Write not permitted"**: this integration already writes
-  using "Write Without Response" (`response=False`), which is what the real
-  hardware expects — if you're modifying the protocol code, note that
-  `response=True` fails immediately against the real device.
+- **"Service not found" when the automation runs**: check that `fluval:`
+  (with your `mac_address:`) is present in `configuration.yaml`. A component
+  like this one does nothing at all, silently, if it's not referenced there.
 - **Occasional GATT error 133 / connection drops**: normal over BLE,
-  especially if your light's signal is marginal at the proxy/adapter hearing
-  it. The integration already catches this and logs a warning instead of
-  surfacing an automation error — the next 5-minute run self-corrects.
-- **No `Fluval schedule applied: ...` line ever showing in your log**: Home
-  Assistant's default log level often doesn't include `INFO`. Add this to
-  `configuration.yaml` to see confirmation of every successful run:
+  especially when the light's signal is marginal at the proxy. The
+  integration logs a warning and the next 5-minute run tries again.
+- **The FluvalSmart app can't connect**: the light accepts one Bluetooth
+  connection at a time. Home Assistant only holds it for about a second every
+  5 minutes, so retry after a few seconds.
+- **No `Fluval clock synced to ...` lines in your log**: Home Assistant's
+  default log level often hides `INFO`. Add this to `configuration.yaml`:
 
   ```yaml
   logger:
@@ -107,6 +116,9 @@ model and it works (or needs tweaking), please open an issue or PR.
       custom_components.fluval: info
   ```
 
+  Each run then logs the clock it set and a `Fluval state: mode=...` line
+  with the light's reported mode and raw schedule.
+
 ## License
 
-MIT — see `LICENSE`.
+MIT, see `LICENSE`.

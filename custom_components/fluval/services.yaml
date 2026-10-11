@@ -1,6 +1,7 @@
 apply_schedule:
-  name: Apply schedule
+  name: Sync clock
   description: >-
     Connects to the Fluval Plant 3.0 light over BLE, via whichever Bluetooth
-    proxy currently has it in range, and applies the correct power and
-    per-channel brightness for the current time of day.
+    proxy currently has it in range, and sets the light's clock to Home
+    Assistant's local time so its own Auto/Pro schedule runs at the right
+    time of day.
